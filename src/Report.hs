@@ -32,8 +32,9 @@ thread :: Type -> Bool -> Chan.Chan Message -> Package -> Int -> IO ()
 thread reportType warn messageChan rootPkg totalTasks =
   case reportType of
     Normal ->
-        do  isTerminal <- checkIsTerminal
-            normalLoop isTerminal warn messageChan rootPkg totalTasks 0 0
+        do  outIsTerminal <- checkIfOutIsTerminal
+            errIsTerminal <- checkIfErrIsTerminal
+            normalLoop outIsTerminal errIsTerminal warn messageChan rootPkg totalTasks 0 0
 
     Json ->
         jsonLoop messageChan rootPkg 0
@@ -76,19 +77,19 @@ printJsonList toJson values =
 -- NORMAL LOOP
 
 
-normalLoop :: Bool -> Bool -> Chan.Chan Message -> Package -> Int -> Int -> Int -> IO ()
-normalLoop isTerminal warn messageChan rootPkg total successes failures =
+normalLoop :: Bool -> Bool -> Bool -> Chan.Chan Message -> Package -> Int -> Int -> Int -> IO ()
+normalLoop outIsTerminal errIsTerminal warn messageChan rootPkg total successes failures =
   let
     go =
-      normalLoop isTerminal warn messageChan rootPkg total
+      normalLoop outIsTerminal errIsTerminal warn messageChan rootPkg total
   in
-  do  when isTerminal $
+  do  when outIsTerminal $
           do  hPutStr stdout (renderProgressBar successes failures total)
               hFlush stdout
 
       update <- Chan.readChan messageChan
 
-      when isTerminal $
+      when outIsTerminal $
           hPutStr stdout clearProgressBar
 
       case update of
@@ -99,8 +100,8 @@ normalLoop isTerminal warn messageChan rootPkg total successes failures =
         Complete (CanonicalModule pkg _) localizer path source warnings ->
             do  when (pkg == rootPkg && warn && not (null warnings)) $
                     do  hFlush stdout
-                        printSeparator isTerminal Yellow "WARNINGS"
-                        mapM_ (printWarning isTerminal localizer path source) warnings
+                        printSeparator errIsTerminal Yellow "WARNINGS"
+                        mapM_ (printWarning errIsTerminal localizer path source) warnings
 
                 go (successes + 1) failures
 
@@ -108,14 +109,14 @@ normalLoop isTerminal warn messageChan rootPkg total successes failures =
             do  hFlush stdout
 
                 when (pkg == rootPkg && warn && not (null warnings)) $
-                    do  printSeparator isTerminal Yellow "WARNINGS"
-                        mapM_ (printWarning isTerminal localizer path source) warnings
+                    do  printSeparator errIsTerminal Yellow "WARNINGS"
+                        mapM_ (printWarning errIsTerminal localizer path source) warnings
 
 
                 if pkg == rootPkg
                   then
-                    do  when (length warnings + failures > 0) (printSeparator isTerminal Red "ERRORS")
-                        mapM_ (printError isTerminal localizer path source) errors
+                    do  when (length warnings + failures > 0) (printSeparator errIsTerminal Red "ERRORS")
+                        mapM_ (printError errIsTerminal localizer path source) errors
 
                   else
                     hPutStr stderr (dependencyError pkg)
@@ -138,7 +139,7 @@ dependencyError (pkgName, version) =
 
 
 printSeparator :: Bool -> Color -> String -> IO ()
-printSeparator isTerminal color header =
+printSeparator errIsTerminal color header =
   let
     total =
       80 - 2 - length header
@@ -152,34 +153,37 @@ printSeparator isTerminal color header =
     mkPad n =
       replicate n '='
   in
-    do  when isTerminal $ hSetSGR stderr [SetColor Foreground Dull color]
+    do  when errIsTerminal $ hSetSGR stderr [SetColor Foreground Dull color]
         hPutStr stderr (mkPad left ++ " " ++ header ++ " " ++ mkPad right ++ "\n\n")
-        when isTerminal $ hSetSGR stderr [Reset]
+        when errIsTerminal $ hSetSGR stderr [Reset]
 
 
 printError :: Bool -> Compiler.Localizer -> FilePath -> String -> Compiler.Error -> IO ()
-printError isTerminal localizer path source err =
-  if isTerminal then
+printError errIsTerminal localizer path source err =
+  if errIsTerminal then
     Compiler.printError stderr localizer path source err
   else
     hPutStr stderr (Compiler.errorToString localizer path source err)
 
 
 printWarning :: Bool -> Compiler.Localizer -> FilePath -> String -> Compiler.Warning -> IO ()
-printWarning isTerminal localizer path source err =
-  if isTerminal then
+printWarning errIsTerminal localizer path source err =
+  if errIsTerminal then
     Compiler.printWarning stderr localizer path source err
   else
     hPutStr stderr (Compiler.warningToString localizer path source err)
 
 
-checkIsTerminal :: IO Bool
-checkIsTerminal =
+checkIfOutIsTerminal :: IO Bool
+checkIfOutIsTerminal =
   do  outIsTerminal <- hIsTerminalDevice stdout
-      errIsTerminal <- hIsTerminalDevice stderr
-      return (outIsTerminal && errIsTerminal)
+      return outIsTerminal
 
 
+checkIfErrIsTerminal :: IO Bool
+checkIfErrIsTerminal =
+  do  errIsTerminal <- hIsTerminalDevice stderr
+      return errIsTerminal
 
 -- PROGRESS BAR
 
