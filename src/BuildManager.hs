@@ -163,8 +163,8 @@ printError :: Error -> IO ()
 printError err =
   case err of
     CompilerErrors path source errors ->
-        do  isTerminal <- Report.checkIsTerminal
-            mapM_ (Report.printError isTerminal Compiler.dummyLocalizer path source) errors
+        do  errIsTerminal <- Report.checkIfErrIsTerminal
+            mapM_ (Report.printError errIsTerminal Compiler.dummyLocalizer path source) errors
 
     CorruptedArtifact filePath ->
         hPutStrLn stderr $
@@ -307,4 +307,3 @@ drawCycle modules =
         "  └─────┘"
   in
     unlines (topLine ++ List.intercalate midLine (map line modules) ++ [ bottomLine ])
-
